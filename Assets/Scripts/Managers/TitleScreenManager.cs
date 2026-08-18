@@ -14,10 +14,8 @@ public class TitleScreenManager : MonoBehaviour
     void Start()
     {
         playButton.onClick.AddListener(OnPlayClicked);
-        // hide panels we don't need yet
-        if (nameEntryManager != null)
-            nameEntryManager.gameObject.SetActive(false);
-        lobbyPanel.SetActive(false);
+        
+        lobbyPanel.SetActive(false); // hide lobby at start
     }
 
     void OnPlayClicked()

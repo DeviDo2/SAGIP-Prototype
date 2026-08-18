@@ -19,7 +19,7 @@
     "MasterClientRequestReassignThreshold": 2.0,
     "ClientsRecordFrameAndPacketTimingTraces": false,
     "Simulation": {
-        "InputDataWordCount": 0,
+        "InputDataWordCount": 2,
         "ReplicationFeatures": 0,
         "InterestManagementConfig": {
             "AreaOfInterestCellSize": 32,

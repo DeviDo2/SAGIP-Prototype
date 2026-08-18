@@ -1,12 +1,23 @@
+using Fusion;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Fusion;
 
 public class LobbyPlayerData : NetworkBehaviour
 {
-    [Networked] public NetworkString<_32> PlayerName { get; set; }
-    [Networked] public NetworkBool IsReady { get; set; }
+    public static event Action<LobbyPlayerData> OnDataChanged;
+
+    [Networked, OnChangedRender(nameof(OnLobbyDataChanged))]
+    public NetworkString<_32> PlayerName { get; set; }
+
+    [Networked, OnChangedRender(nameof(OnLobbyDataChanged))]
+    public NetworkBool IsReady { get; set; }
+
+    private void OnLobbyDataChanged()
+    {
+        OnDataChanged?.Invoke(this);
+    }
 
     /// <summary>
     /// Called by the owning client to set their name.

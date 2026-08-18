@@ -3,7 +3,9 @@ using Fusion.Sockets;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,61 +20,79 @@ public class LobbyUI : MonoBehaviour, INetworkRunnerCallbacks
     [SerializeField] private Button startButton;
     [SerializeField] private TextMeshProUGUI statusText;
 
+    [Header("Host Code Display")]
+    [SerializeField] private GameObject hostCodeGroup;       // a parent object containing the code field + copy button
+    [SerializeField] private TMP_InputField hostCodeInput;   // read-only, displays the party code
+    [SerializeField] private Button hostCopyButton;
+
+    [SerializeField] private RoleSelectionUI roleSelectionUI;
+
     private NetworkRunner runner;
     private LobbyPlayerData localLobbyPlayer;   // the lobby object owned by this client
     private Dictionary<PlayerRef, LobbyPlayerData> allPlayers = new();
+    private Dictionary<PlayerRef, LobbyPlayerEntry> playerEntries = new();
+
     private bool isHost = false;
+    private bool isTransitioning = false;
 
     void Start()
     {
         lobbyPanel.SetActive(false);
         startButton.gameObject.SetActive(false);
         readyButton.onClick.AddListener(OnReadyClicked);
+        startButton.onClick.AddListener(OnStartGameClicked);
+
+        // Wire copy button if assigned
+        if (hostCopyButton != null)
+            hostCopyButton.onClick.AddListener(CopyCodeToClipboard);
     }
 
-    public void ShowLobby()
+    
+    // Overload that receives party code (called from LobbyManager)
+    public async void ShowLobby(string partyCode)
     {
         lobbyPanel.SetActive(true);
         runner = FindObjectOfType<NetworkRunner>();
+
         if (runner != null)
         {
             isHost = runner.GameMode == GameMode.Host;
             startButton.gameObject.SetActive(isHost);
-            // Hook into player join/leave events
+            
             runner.AddCallbacks(this);
         }
 
-        // If host, spawn the local lobby player immediately
+        // Show code UI only for host
+        if (hostCodeGroup != null)
+            hostCodeGroup.SetActive(isHost);
+
+        if (isHost && hostCodeInput != null)
+            hostCodeInput.text = partyCode;
+
+        // For both host and client: immediately scan for any already spawned LobbyPlayers
+        RefreshAllPlayers();
+
         if (isHost)
-            SpawnLobbyPlayer(runner.LocalPlayer);
-        else
-            StartCoroutine(WaitForMyPlayer());
-    }
-
-    // For clients: wait until the host spawns our LobbyPlayer, then set name
-    IEnumerator WaitForMyPlayer()
-    {
-        while (localLobbyPlayer == null)
         {
-            // Try to find our player object (the one with input authority = local player)
-            foreach (var kvp in allPlayers)
-            {
-                if (kvp.Value.Object.HasInputAuthority)
-                {
-                    localLobbyPlayer = kvp.Value;
-                    break;
-                }
-            }
-            yield return null;
+            await SpawnLocalLobbyPlayerIfNeeded();
         }
-        SetMyName();
+        else
+        {
+            // Client: wait until its own LobbyPlayer appears (spawned by host)
+            StartCoroutine(WaitForMyPlayer());
+        }
     }
 
-    // After spawning (or finding) our own player, set the name
-    void SetMyName()
+    // In LobbyUI.cs
+    public void ShowLobby() => ShowLobby("");   // for clients
+
+    void CopyCodeToClipboard()
     {
-        if (localLobbyPlayer != null && !string.IsNullOrEmpty(PlayerData.LocalPlayerName))
-            localLobbyPlayer.RPC_SetName(PlayerData.LocalPlayerName);
+        if (hostCodeInput != null)
+        {
+            GUIUtility.systemCopyBuffer = hostCodeInput.text;
+            statusText.text = "Code copied!";
+        }
     }
 
     void OnDestroy()
@@ -83,22 +103,68 @@ public class LobbyUI : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
     // ---------- INetworkRunnerCallbacks implementation ----------
-    public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
+    public async void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
     {
+        // Host spawns the lobby object for the new player
         if (isHost)
-        {
-            SpawnLobbyPlayer(player);
-        }
+            await SpawnLobbyPlayer(player);
+        else
+            // Client refreshes its list because a new LobbyPlayer has been spawned
+            RefreshAllPlayers();
     }
 
     public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
     {
+        Debug.Log(
+            $"[PLAYER LEFT] " +
+            $"Local={runner.LocalPlayer} " +
+            $"Player={player} " +
+            $"Remaining={runner.ActivePlayers.Count()}"
+        );
+
         if (allPlayers.TryGetValue(player, out var data))
         {
-            Destroy(data.gameObject);
+            // Fusion objects must be removed by the state authority, never
+            // with UnityEngine.Object.Destroy.
+            if (data != null && 
+                data.Object != null && 
+                data.Object.IsValid && 
+                data.Object.HasStateAuthority)
+            {
+                runner.Despawn(data.Object);
+            }
+
             allPlayers.Remove(player);
-            RefreshPlayerList();
         }
+
+        // Remove this player's UI entry.
+        if (playerEntries.TryGetValue(player, out var entry))
+        {
+            if (entry != null)
+                Destroy(entry.gameObject);
+
+            playerEntries.Remove(player);
+        }
+    }
+
+    public void OnSceneLoadStart(NetworkRunner runner)
+    {
+        Debug.Log(
+            $"[SCENE START] " +
+            $"Local={runner.LocalPlayer} " +
+            $"IsHost={runner.IsServer} " +
+            $"Scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}"
+        );
+    }
+
+    public void OnSceneLoadDone(NetworkRunner runner)
+    {
+        Debug.Log(
+            $"[SCENE DONE] " +
+            $"Local={runner.LocalPlayer} " +
+            $"IsHost={runner.IsServer} " +
+            $"Scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}"
+        );
     }
 
     // These are required by the interface but we don't need them yet.
@@ -113,16 +179,104 @@ public class LobbyUI : MonoBehaviour, INetworkRunnerCallbacks
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
-    public void OnSceneLoadDone(NetworkRunner runner) { }
-    public void OnSceneLoadStart(NetworkRunner runner) { }
+    
     public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
     public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-    public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason) { }
+    public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason) 
+    {
+            Debug.Log(
+            $"[SHUTDOWN] " +
+            $"Local={runner.LocalPlayer} " +
+            $"Reason={shutdownReason}"
+        );
+    }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ReadOnlySpan<byte> data) { }
     public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
     // -------------------------------------------------------------
 
-    async void SpawnLobbyPlayer(PlayerRef player)
+    /// <summary>
+    /// Finds all LobbyPlayerData objects in the scene and fills the allPlayers dictionary.
+    /// </summary>
+
+    private void OnEnable()
+    {
+        LobbyPlayerData.OnDataChanged += HandlePlayerDataChanged;
+    }
+
+    private void OnDisable()
+    {
+        LobbyPlayerData.OnDataChanged -= HandlePlayerDataChanged;
+    }
+    
+    private void HandlePlayerDataChanged(LobbyPlayerData data)
+    {
+        //UpdatePlayerEntryFromNetwork(data);
+
+    }
+
+    void RefreshAllPlayers()
+    {
+        var players = FindObjectsOfType<LobbyPlayerData>();
+
+        foreach (var data in players)
+        {
+            if (data.Object == null || !data.Object.IsValid) 
+                continue;
+
+            PlayerRef playerRef = data.Object.InputAuthority;
+
+            if (!allPlayers.ContainsKey(playerRef))
+            {
+                allPlayers[playerRef] = data;
+
+                // If this object belongs to us, set local reference
+                if (data.Object.HasInputAuthority)
+                {
+                    localLobbyPlayer = data;
+                    // Set the player name (needs to be done only once)
+                    SetMyName();
+                }
+            }
+
+            // Make sure this player's UI entry exists and is current.
+            UpdatePlayerEntry(playerRef, data);
+
+        }
+    }
+
+    /// <summary>
+    /// Host spawns its own LobbyPlayer if it hasn't already.
+    /// </summary>
+    async Task SpawnLocalLobbyPlayerIfNeeded()
+    {
+        // If we already have a LobbyPlayer with our input authority, don't spawn again
+        if (localLobbyPlayer != null) return;
+
+        await SpawnLobbyPlayer(runner.LocalPlayer);
+    }
+
+    /// <summary>
+    /// Coroutine for clients: wait until the host spawns our LobbyPlayer, then set name.
+    /// </summary>
+    IEnumerator WaitForMyPlayer()
+    {
+        
+        while (localLobbyPlayer == null)
+        {
+            RefreshAllPlayers();
+            yield return null;
+        }
+        SetMyName();
+    }
+
+    void SetMyName()
+    {
+        if (localLobbyPlayer != null && !string.IsNullOrEmpty(PlayerData.LocalPlayerName))
+            localLobbyPlayer.RPC_SetName(PlayerData.LocalPlayerName);
+    }
+
+
+    async Task SpawnLobbyPlayer(PlayerRef player)
     {
         // Load the prefab from Resources folder (must be named exactly "LobbyPlayer")
         NetworkObject obj = await runner.SpawnAsync(
@@ -145,7 +299,8 @@ public class LobbyUI : MonoBehaviour, INetworkRunnerCallbacks
                 localLobbyPlayer = data;
                 SetMyName();
             }
-            RefreshPlayerList();
+
+            UpdatePlayerEntry(player, data);
         }
     }
 
@@ -159,50 +314,103 @@ public class LobbyUI : MonoBehaviour, INetworkRunnerCallbacks
 
     void Update()
     {
+        if (isTransitioning) return; // do nothing while transitioning
         if (runner == null) return;
 
         if (isHost)
         {
             bool allReady = true;
             int count = 0;
+
             foreach (var kvp in allPlayers)
             {
+                if (kvp.Value == null || 
+                    kvp.Value.Object == null || 
+                    !kvp.Value.Object.IsValid)
+                    continue;
+
                 count++;
+
                 if (!kvp.Value.IsReady)
                 {
                     allReady = false;
                     break;
                 }
             }
+
             startButton.interactable = (count >= 2 && allReady);
         }
-
-        RefreshPlayerList();
+        Debug.Log(
+            $"[LOBBY] ActivePlayers={runner.ActivePlayers.Count()} " +
+            $"TrackedPlayers={allPlayers.Count}"
+        );
     }
 
-    void RefreshPlayerList()
+    public void UpdatePlayerEntryFromNetwork(LobbyPlayerData data)
     {
-        foreach (Transform child in playerListContainer)
-            Destroy(child.gameObject);
+        if (data == null || data.Object == null || !data.Object.IsValid)
+            return;
 
-        foreach (var kvp in allPlayers)
-        {
-            var entry = Instantiate(playerEntryPrefab, playerListContainer);
-            var texts = entry.GetComponentsInChildren<TextMeshProUGUI>();
+        PlayerRef player = data.Object.InputAuthority;
 
-            string playerName = "";
-            kvp.Value.PlayerName.Get(ref playerName);
-            texts[0].text = string.IsNullOrEmpty(playerName) ? $"Player {kvp.Key}" : playerName;
-            texts[1].text = kvp.Value.IsReady ? "Ready" : "Not Ready";
-        }
+        if (!allPlayers.ContainsKey(player))
+            allPlayers[player] = data;
+
+        UpdatePlayerEntry(player, data);
     }
 
-    public void OnStartGameClicked()
+    void UpdatePlayerEntry(PlayerRef player, LobbyPlayerData data)
     {
-        if (isHost && runner != null)
+        if (data == null || data.Object == null || !data.Object.IsValid)
+            return;
+
+        if (!playerEntries.TryGetValue(player, out LobbyPlayerEntry entry) || entry == null)
         {
-            runner.LoadScene(SceneRef.FromIndex(1)); // Gameplay scene index
+            GameObject entryObject = Instantiate(
+                playerEntryPrefab,
+                playerListContainer
+            );
+
+            entry = entryObject.GetComponent<LobbyPlayerEntry>();
+
+            if (entry == null)
+            {
+                Debug.LogError(
+                    "playerEntryPrefab is missing LobbyPlayerEntry component.",
+                    entryObject
+                );
+                Destroy(entryObject);
+                return;
+            }
+
+            playerEntries[player] = entry;
         }
+
+        string playerName = "";
+        string role = "";
+        data.PlayerName.Get(ref playerName);
+
+        if (string.IsNullOrEmpty(playerName))
+            playerName = $"Player {player}";
+
+        entry.SetData(playerName,role , data.IsReady);
+    }
+
+    public async void OnStartGameClicked()
+    {
+        if (!isHost || runner == null) return;
+
+        isTransitioning = true;   // stop refreshing
+        lobbyPanel.SetActive(false); // hide lobby immediately
+
+        NetworkObject obj = await runner.SpawnAsync(
+            Resources.Load<NetworkObject>("RoleSelectionManager"),
+            position: Vector3.zero,
+            rotation: Quaternion.identity,
+            inputAuthority: runner.LocalPlayer
+        );
+        var manager = obj.GetComponent<RoleSelectionManager>();
+        manager.BeginRoleSelection();
     }
 
 }

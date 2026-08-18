@@ -1,9 +1,9 @@
 using System.Collections;
-using System.Collections.Generic;
+using Fusion;
+using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using UnityEngine.SceneManagement; // for restart
-using TMPro; // if using TextMeshPro, else use regular Text
 
 public class UIManager : MonoBehaviour
 {
@@ -19,6 +19,8 @@ public class UIManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI scoreText;
     [SerializeField] private Button restartButton;
     [SerializeField] private Button mainMenuButton;
+
+    private bool isLeavingSession;
 
     private void Awake()
     {
@@ -51,10 +53,14 @@ public class UIManager : MonoBehaviour
 
     void Update()
     {
-        if (GameManager.Instance == null || GameManager.Instance.gameEnded) return;
+        if (GameManager.Instance == null || GameManager.Instance.Object == null || !GameManager.Instance.Object.IsValid)
+            return;
+
+        if (GameManager.Instance.gameEnded) return;
+
 
         // Update timer
-        float timeLeft = GameManager.Instance.timer;
+        float timeLeft = GameManager.Instance.Timer;
         int minutes = Mathf.FloorToInt(timeLeft / 60f);
         int seconds = Mathf.FloorToInt(timeLeft % 60f);
         if (timerText != null)
@@ -62,7 +68,7 @@ public class UIManager : MonoBehaviour
 
         // Update progress
         if (progressText != null)
-            progressText.text = $"Rescued: {GameManager.Instance.rescuedCount}/{GameManager.Instance.totalSurvivors}\nStabilised: {GameManager.Instance.stabilisedCount}/{GameManager.Instance.totalSurvivors}";
+            progressText.text = $"Rescued: {GameManager.Instance.RescuedCount}/{GameManager.Instance.totalSurvivors}\nStabilised: {GameManager.Instance.StabilisedCount}/{GameManager.Instance.totalSurvivors}";
 
     }
 
@@ -75,11 +81,32 @@ public class UIManager : MonoBehaviour
 
     public void RestartGame()
     {
-        SceneManager.LoadScene("Gameplay");
+        // A new round needs fresh lobby role assignments, so safely end the
+        // current Fusion session before returning to the menu.
+        ReturnToMainMenu();
     }
 
     public void ReturnToMainMenu()
     {
+        if (!isLeavingSession)
+            StartCoroutine(ShutdownAndReturnToMainMenu());
+    }
+
+    private IEnumerator ShutdownAndReturnToMainMenu()
+    {
+        isLeavingSession = true;
+
+        NetworkRunner runner = FindObjectOfType<NetworkRunner>();
+        if (runner != null && runner.IsRunning)
+        {
+            runner.Shutdown();
+
+            // Shutdown destroys the runner by default. Waiting prevents its
+            // network objects from surviving behind the title scene.
+            while (runner != null && runner.IsRunning)
+                yield return null;
+        }
+
         SceneManager.LoadScene("MainMenu");
     }
 

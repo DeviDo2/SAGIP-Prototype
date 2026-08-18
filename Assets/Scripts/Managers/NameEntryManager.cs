@@ -9,11 +9,6 @@ public class NameEntryManager : MonoBehaviour
     [SerializeField] private GameObject nameEntryPanel;
     [SerializeField] private GameObject lobbyPanel;   // the panel that appears after name entry
 
-    void Start()
-    {
-        nameEntryPanel.SetActive(false);   // ensure hidden on start
-        // (MainMenuManager will activate it)
-    }
     
     public void Show()
     {
@@ -23,15 +18,28 @@ public class NameEntryManager : MonoBehaviour
 
     public void OnConfirmClicked()
     {
+        Debug.Log("Confirm button pressed");
+
         string input = nameInput.text.Trim();
         if (string.IsNullOrEmpty(input))
-            return; // maybe show a warning
+        {
+            Debug.LogWarning("Name input is empty");
+            return;
+        }
 
         PlayerData.LocalPlayerName = input;
         nameEntryPanel.SetActive(false);
 
-        // Show the lobby choice panel (host/join)
-        lobbyPanel.SetActive(true);
+        // Show the lobby choice panel
+        if (lobbyPanel != null)
+        {
+            lobbyPanel.SetActive(true);
+            Debug.Log("Lobby panel activated");
+        }
+        else
+        {
+            Debug.LogError("lobbyPanel is not assigned in the Inspector!");
+        }
     }
 
 }

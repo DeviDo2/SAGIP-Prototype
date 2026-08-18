@@ -2,7 +2,7 @@
 - Project name: SAGIP-Prototype
 - Unity version: Unity 2022.3.62f3
 - Active game object:
-  - Name: RoleSelectPanel
+  - Name: PartyPanel
   - Tag: Untagged
   - Layer: UI
 <!-- UNITY CODE ASSIST INSTRUCTIONS END -->

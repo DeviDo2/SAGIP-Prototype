@@ -5,6 +5,8 @@ using UnityEngine.UI;
 
 public class TagSelectionPopup : MonoBehaviour
 {
+    public static TagSelectionPopup Instance { get; private set; }
+
     [SerializeField] private Button greenButton;
     [SerializeField] private Button yellowButton;
     [SerializeField] private Button redButton;
@@ -15,7 +17,14 @@ public class TagSelectionPopup : MonoBehaviour
 
     private void Awake()
     {
-        // Hide at start
+        // Singleton pattern
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+
         gameObject.SetActive(false);
         IsVisible = false;
 

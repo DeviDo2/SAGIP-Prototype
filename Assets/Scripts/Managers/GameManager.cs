@@ -1,84 +1,165 @@
+using Fusion;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks; // added for Task.Yield()
 using UnityEngine;
-
-public class GameManager : MonoBehaviour
+using System.Linq;
+public class GameManager : NetworkBehaviour
 {
     public static GameManager Instance;
     public enum PlayerRole { Scout, Rescuer, Medic }
 
-    // Reference to the three player GameObjects (assign in Inspector)
-    [Header("Players")]
-    public GameObject scoutPlayer;
-    public GameObject rescuerPlayer;
-    public GameObject medicPlayer;
+    [Header("Player Prefabs")]
+    [SerializeField] private NetworkObject scoutPrefab;
+    [SerializeField] private NetworkObject rescuerPrefab;
+    [SerializeField] private NetworkObject medicPrefab;
 
+    [Header("Spawn Points")]
+    [SerializeField] private Transform[] spawnPoints;   // assign 3 empty GameObjects in the scene
+
+    /*
     // Internal array to hold the player GameObjects for easy access
     private PlayerMovement[] playerMovements;
     [HideInInspector] public InteractionHandler[] interactionHandlers;
+    */
 
     [field: Header("Mission Settings")]
-    [field: SerializeField] public int totalSurvivors { get; private set; } // set in Inspector
+    [field: SerializeField] public int totalSurvivors { get; private set; } = 3; // set in Inspector
     [field: SerializeField] public float levelTime = 300f;           // 5 minutes
-    [field: SerializeField] public int rescuedCount { get; private set; }
-    [field: SerializeField] public int stabilisedCount { get; private set; }
-    [field: SerializeField] public int correctTagCount = 0; // Count of survivors tagged correctly by Scout
-    [field: SerializeField] public int incorrectTagCount = 0; // Count of survivors tagged incorrectly by Scout
-    [field: SerializeField] public float timer { get; private set; }
-    [field: SerializeField] public bool gameEnded { get; private set; } = false;
 
-    public PlayerRole currentRole { get; private set; }
+    // Networked state: only the host writes to these, but all clients can read them.
+    [Networked] private int rescuedCount { get; set; }
+    [Networked] private int stabilisedCount { get; set; }
+    [Networked] private int correctTagCount { get; set; }
+    [Networked] private int incorrectTagCount { get; set; }
+    [Networked] private float timer { get; set; }
+    [Networked] public NetworkBool gameEnded { get; set; }
 
-    void Awake()
+    public int RescuedCount => rescuedCount;
+    public int StabilisedCount => stabilisedCount;
+    public int CorrectTagCount => correctTagCount;
+    public int IncorrectTagCount => incorrectTagCount;
+    public float Timer => timer;
+
+    public override void Spawned()
     {
-        Instance = this;
+        Debug.Log(
+            $"[GAME MANAGER SPAWNED] " +
+            $"Local={Runner.LocalPlayer} " +
+            $"Authority={Object.HasStateAuthority} " +
+            $"ActivePlayers={Runner.ActivePlayers.Count()} " +
+            $"Roles={SessionData.FinalRoles?.Count ?? -1}"
+        );
 
-        // Choose role from session data, fallback to Scout
-        currentRole = SessionData.SelectedRole ?? PlayerRole.Scout;
-        SessionData.SelectedRole = null; // clear for next game
-
-
-        // Cache movement and interaction components for each player
-        playerMovements = new PlayerMovement[3];
-        interactionHandlers = new InteractionHandler[3];
-
-        playerMovements[0] = scoutPlayer.GetComponent<PlayerMovement>();
-        playerMovements[1] = rescuerPlayer.GetComponent<PlayerMovement>();
-        playerMovements[2] = medicPlayer.GetComponent<PlayerMovement>();
-
-        interactionHandlers[0] = scoutPlayer.GetComponent<InteractionHandler>();
-        interactionHandlers[1] = rescuerPlayer.GetComponent<InteractionHandler>();
-        interactionHandlers[2] = medicPlayer.GetComponent<InteractionHandler>();
-    }
-    void Start()
-    {
-        timer = levelTime;
-
-        // Only activate the chosen role’s player
-        for (int i = 0; i < 3; i++)
+        foreach (var player in Runner.ActivePlayers)
         {
-            bool active = (i == (int)currentRole);
-            playerMovements[i].SetActive(active);
-            interactionHandlers[i].SetActive(active);
+            Debug.Log($"[GAME MANAGER PLAYER] {player}");
         }
 
-        // Camera follow
-        CameraController.Instance?.SetTarget(GetActivePlayerTransform());
+        Instance = this;
 
+        if (!Object.HasStateAuthority)
+            return;
+
+        timer = levelTime;
+
+        StartCoroutine(SpawnPlayersWhenReady());
     }
 
-    private void Update()
+    private IEnumerator SpawnPlayersWhenReady()
     {
+        yield return null;
+        yield return null;
+        yield return null;
+
+        if (!Object.HasStateAuthority)
+            yield break;
+
+        Debug.Log(
+            $"[GAME MANAGER BEFORE SPAWN] " +
+            $"ActivePlayers={Runner.ActivePlayers.Count()} " +
+            $"Roles={SessionData.FinalRoles?.Count ?? -1}"
+        );
+
+        foreach (var player in Runner.ActivePlayers)
+        {
+            Debug.Log($"[GAME MANAGER BEFORE SPAWN PLAYER] {player}");
+        }
+
+        SpawnPlayers();
+    }
+
+    private async Task SpawnPlayers()
+    {
+        if (!Object.HasStateAuthority)
+            return;
+
+        var roles = SessionData.FinalRoles;
+
+        if (roles == null || roles.Count == 0)
+        {
+            Debug.LogError(
+                $"[GAME MANAGER] No role data. " +
+                $"Roles={roles?.Count ?? 0}"
+            );
+            return;
+        }
+
+        if (roles.Count != Runner.ActivePlayers.Count())
+        {
+            Debug.LogWarning(
+                $"[GAME MANAGER] Role/player count mismatch. " +
+                $"Roles={roles.Count}, " +
+                $"Players={Runner.ActivePlayers.Count()}"
+            );
+        }
+
+        int index = 0;
+
+        foreach (var kvp in roles)
+        {
+            NetworkObject prefab = GetPrefab(kvp.Value);
+
+            if (prefab == null)
+            {
+                Debug.LogError($"No prefab for role {kvp.Value}");
+                return;
+            }
+
+            Transform spawn = spawnPoints[index];
+
+            var playerObj = await Runner.SpawnAsync(
+                prefab,
+                spawn.position,
+                spawn.rotation,
+                kvp.Key
+            );
+
+            if (playerObj == null)
+            {
+                Debug.LogError($"Failed to spawn {kvp.Key}");
+                return;
+            }
+
+            Runner.SetPlayerObject(kvp.Key, playerObj);
+
+            index++;
+        }
+
+        Debug.Log("[GAME MANAGER] ALL PLAYERS SPAWNED");
+    }
+
+    public override void FixedUpdateNetwork()
+    {
+        if (!Object.HasStateAuthority) return;
         if (gameEnded) return;
 
-        timer -= Time.deltaTime;
+        timer -= Runner.DeltaTime;
 
-        // Lose condition
-        if (timer <= 0)
+        if (timer <= 0f)
         {
             EndGame(false);
         }
-        // Win condition
         else if (AllSurvivorsHandled())
         {
             EndGame(true);
@@ -87,48 +168,80 @@ public class GameManager : MonoBehaviour
 
     bool AllSurvivorsHandled()
     {
-        // Check all survivors that are NOT Red have been rescued AND stabilised.
         Survivor[] all = FindObjectsOfType<Survivor>();
-        foreach (Survivor s in all)
+        foreach (Survivor survivor in all)
         {
-            if (s.tagColor == TagColor.Red) continue;   // Red are lost, ignore
-            if (!s.isRescued || !s.isStable)
-                return false;
+            switch (survivor.tagColor)
+            {
+                case TagColor.None:
+                    return false;
+
+                case TagColor.Green:
+                    // Green survivors self-rescue and are never stabilized.
+                    if (!survivor.isRescued)
+                        return false;
+                    break;
+
+                case TagColor.Yellow:
+                    if (!survivor.isRescued || !survivor.isStable)
+                        return false;
+                    break;
+
+                case TagColor.Red:
+                    // Red survivors are intentionally not rescuable.
+                    break;
+            }
         }
         return true;
     }
 
-    // Called by Survivor when dropped in Safe Zone
+    // Called by survivors (via RPCs) when their state changes
     public void OnSurvivorRescued(Survivor survivor)
     {
+        if (!Object.HasStateAuthority) return;
         rescuedCount++;
 
-        // Tag correctness check
+        // Score bonus/penalty based on correct tagging
         if (survivor.GetCorrectTag() == survivor.tagColor)
             correctTagCount++;
         else
             incorrectTagCount++;
     }
 
-    // Called by Survivor when fully healed
     public void OnSurvivorStabilised(Survivor s)
     {
+        if (!Object.HasStateAuthority) return;
         stabilisedCount++;
     }
 
     void EndGame(bool won)
     {
         gameEnded = true;
-        // Calculate score
         int score = (rescuedCount * 100) + (stabilisedCount * 50)
-                    + (int)(timer * 10) + (correctTagCount * 30);
+                    + (int)(timer * 10) + (correctTagCount * 30) - (incorrectTagCount * 20);
 
-        // Notify UI
+        // Tell all clients to show the end screen
+        RPC_ShowEndScreen(won, score);
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    void RPC_ShowEndScreen(bool won, int score)
+    {
         UIManager.Instance.ShowEndScreen(won, score);
     }
 
-    public Transform GetActivePlayerTransform()
+    private NetworkObject GetPrefab(PlayerRole role)
     {
-        return playerMovements[(int)currentRole].transform;
+        switch (role)
+        {
+            case PlayerRole.Scout:
+                return scoutPrefab;
+            case PlayerRole.Rescuer:
+                return rescuerPrefab;
+            case PlayerRole.Medic:
+                return medicPrefab;
+            default:
+                return null;
+        }
     }
 }

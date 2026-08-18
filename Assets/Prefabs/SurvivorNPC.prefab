@@ -10,8 +10,9 @@ GameObject:
   m_Component:
   - component: {fileID: 682789831860547364}
   - component: {fileID: 3866407993900293112}
-  - component: {fileID: 2169351013511658344}
   - component: {fileID: 4453553464347351197}
+  - component: {fileID: 7101602964042410959}
+  - component: {fileID: 2169351013511658344}
   m_Layer: 6
   m_Name: SurvivorNPC
   m_TagString: Untagged
@@ -62,24 +63,6 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 112
   m_CollisionDetection: 0
---- !u!114 &2169351013511658344
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 321766808364170308}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 123b4cf8266327148bdb46eefe7e4074, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  maxStability: 100
-  tagColor: 0
-  isRescued: 0
-  isStable: 0
-  carryPoint: {fileID: 0}
-  carrier: {fileID: 0}
 --- !u!136 &4453553464347351197
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -103,6 +86,49 @@ CapsuleCollider:
   m_Height: 0.55
   m_Direction: 1
   m_Center: {x: 0, y: 0.32499996, z: 0}
+--- !u!114 &7101602964042410959
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 321766808364170308}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  SortKey: 167584891
+  SendPriority: 1
+  EnableInterpolation: 1
+  Flags: 262146
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 2169351013511658344}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &2169351013511658344
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 321766808364170308}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 123b4cf8266327148bdb46eefe7e4074, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxStability: 100
+  _currentStability: 0
+  _initialStability: 0
+  _tagColor: 0
+  _isRescued:
+    RawValue: 0
+  _isStable:
+    RawValue: 0
+  _carrier:
+    Raw: 0
+  carryPoint: {fileID: 0}
 --- !u!1 &6941709611356318405
 GameObject:
   m_ObjectHideFlags: 0
